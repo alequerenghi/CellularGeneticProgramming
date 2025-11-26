@@ -2,13 +2,17 @@ package examples;
 
 import static io.jenetics.util.RandomRegistry.random;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import cellular.CellularAlterer;
+import cellular.GraphMap;
 import io.jenetics.Mutator;
 import io.jenetics.engine.Engine;
 import io.jenetics.engine.EvolutionResult;
 import io.jenetics.engine.Limits;
-import io.jenetics.ext.SingleNodeCrossover;
 import io.jenetics.ext.util.TreeNode;
 import io.jenetics.prog.ProgramGene;
 import io.jenetics.prog.op.EphemeralConst;
@@ -56,11 +60,27 @@ public class SymbolicRegressionTest {
 	static final Regression<Double> REGRESSION = Regression
 			.of(Regression.codecOf(OPS, TMS, 5, t -> t.gene().size() < 30), Error.of(LossFunction::mse), SAMPLES);
 
-	public static void main(String... args) {
-		final Engine<ProgramGene<Double>, Double> engine = Engine.builder(REGRESSION).minimizing()
-				.alterers(new SingleNodeCrossover<>(0.1), new Mutator<>()).build();
+	private static final Map<Integer, List<Integer>> CONNECTIONS = new HashMap<>();
 
-		final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream().limit(Limits.byFixedGeneration(1000000))
+	GraphMap grid = (popSize, gridSize) -> {
+		HashMap<Integer, List<Integer>> map = new HashMap<>();
+		for (int i = 0; i < popSize; i++) {
+			ArrayList<Integer> neighbors = new ArrayList<>();
+			neighbors.add((i + 1) % popSize);
+			neighbors.add(i - 1 < 0 ? popSize - 1 : i - 1);
+			neighbors.add((i + gridSize) % popSize);
+			neighbors.add(i - gridSize < 0 ? popSize - gridSize + i : i - gridSize);
+			map.put(i, neighbors);
+		}
+		return map;
+	};
+
+	public static void main(String... args) {
+
+		final Engine<ProgramGene<Double>, Double> engine = Engine.builder(REGRESSION).minimizing().populationSize(100)
+				.alterers(new CellularAlterer<>(CONNECTIONS), new Mutator<>()).build();
+
+		final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream().limit(Limits.byFitnessThreshold(2.0))
 				.collect(EvolutionResult.toBestEvolutionResult());
 
 		final ProgramGene<Double> gene = er.bestPhenotype().genotype().gene();
