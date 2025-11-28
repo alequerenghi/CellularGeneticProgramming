@@ -7,16 +7,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import cellular.CellularAlterer;
+import cellular.CellularEngine;
 import cellular.GraphMap;
-import io.jenetics.Mutator;
-import io.jenetics.engine.Engine;
 import io.jenetics.engine.EvolutionResult;
-import io.jenetics.engine.Limits;
-import io.jenetics.ext.util.TreeNode;
+import io.jenetics.engine.EvolutionStart;
+import io.jenetics.engine.EvolutionStream;
 import io.jenetics.prog.ProgramGene;
 import io.jenetics.prog.op.EphemeralConst;
-import io.jenetics.prog.op.MathExpr;
 import io.jenetics.prog.op.MathOp;
 import io.jenetics.prog.op.Op;
 import io.jenetics.prog.op.Var;
@@ -28,12 +25,12 @@ import io.jenetics.util.ISeq;
 
 public class SymbolicRegressionTest {
 
-	private static final ISeq<Op<Double>> OPS = ISeq.of(MathOp.ADD, MathOp.MUL, MathOp.MUL);
+	private static final ISeq<Op<Double>> OPS = ISeq.of(MathOp.ADD, MathOp.SUB, MathOp.MUL);
 
 	private static final ISeq<Op<Double>> TMS = ISeq.of(Var.of("x", 0),
 			EphemeralConst.of(() -> (double) random().nextInt(10)));
 
-	public static final List<Sample<Double>> SAMPLES = Sample.parseDoubles("""
+	private static final List<Sample<Double>> SAMPLES = Sample.parseDoubles("""
 			-1.0, -8.0000
 			-0.9, -6.2460
 			-0.8, -4.7680
@@ -57,12 +54,10 @@ public class SymbolicRegressionTest {
 			 1.0,  2.0000
 			""");
 
-	static final Regression<Double> REGRESSION = Regression
+	private static final Regression<Double> REGRESSION = Regression
 			.of(Regression.codecOf(OPS, TMS, 5, t -> t.gene().size() < 30), Error.of(LossFunction::mse), SAMPLES);
 
-	private static final Map<Integer, List<Integer>> CONNECTIONS = new HashMap<>();
-
-	GraphMap grid = (popSize, gridSize) -> {
+	private static final GraphMap GRID = (popSize, gridSize) -> {
 		HashMap<Integer, List<Integer>> map = new HashMap<>();
 		for (int i = 0; i < popSize; i++) {
 			ArrayList<Integer> neighbors = new ArrayList<>();
@@ -77,21 +72,38 @@ public class SymbolicRegressionTest {
 
 	public static void main(String... args) {
 
-		final Engine<ProgramGene<Double>, Double> engine = Engine.builder(REGRESSION).minimizing().populationSize(100)
-				.alterers(new CellularAlterer<>(CONNECTIONS), new Mutator<>()).build();
+		Map<Integer, List<Integer>> connections = GRID.getConnections(100, 10);
 
-		final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream().limit(Limits.byFitnessThreshold(2.0))
-				.collect(EvolutionResult.toBestEvolutionResult());
+		CellularEngine<ProgramGene<Double>, Double> cellularEngine = new CellularEngine<>(100, connections::get, gt -> {
+			Double[] computed = gt.gene().apply(SAMPLES.stream().map(i -> i.argAt(0)).toArray(Double[]::new));
+			Double[] effective = SAMPLES.stream().map(Sample::result).toArray(Double[]::new);
 
-		final ProgramGene<Double> gene = er.bestPhenotype().genotype().gene();
+			return LossFunction.mse(effective, computed);
+		});
 
-		TreeNode<Op<Double>> tree = gene.toTreeNode();
+		EvolutionStream.ofEvolution(cellularEngine.start(0, OPS, TMS), i -> cellularEngine.evolve(i));
 
-		MathExpr.rewrite(tree);
+		EvolutionStart<ProgramGene<Double>, Double> start = cellularEngine.start(4, OPS, TMS);
 
-		System.out.println("G" + er.totalGenerations());
-		System.out.println("F" + new MathExpr(tree));
-		System.out.println("E" + REGRESSION.error(tree));
+		EvolutionResult<ProgramGene<Double>, Double> evolve = cellularEngine.evolve(start);
+
+		System.out.println(evolve.bestFitness());
+
+//		final Engine<ProgramGene<Double>, Double> engine = Engine.builder(REGRESSION).minimizing()
+//				.alterers(new SingleNodeCrossover<>(0.1), new Mutator<>()).build();
+//
+//		final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream().limit(Limits.byFitnessThreshold(0.01))
+//				.collect(EvolutionResult.toBestEvolutionResult());
+//
+//		final ProgramGene<Double> gene = er.bestPhenotype().genotype().gene();
+//
+//		TreeNode<Op<Double>> tree = gene.toTreeNode();
+//
+//		MathExpr.rewrite(tree);
+//
+//		System.out.println("G" + er.totalGenerations());
+//		System.out.println("F" + new MathExpr(tree));
+//		System.out.println("E" + REGRESSION.error(tree));
 
 	}
 }
