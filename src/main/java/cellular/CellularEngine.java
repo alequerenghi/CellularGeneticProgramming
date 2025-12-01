@@ -1,12 +1,10 @@
 package cellular;
 
-import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.function.Function;
 
 import io.jenetics.AltererResult;
-import io.jenetics.Genotype;
 import io.jenetics.Mutator;
 import io.jenetics.Optimize;
 import io.jenetics.Phenotype;
@@ -17,84 +15,75 @@ import io.jenetics.engine.Evolution;
 import io.jenetics.engine.EvolutionDurations;
 import io.jenetics.engine.EvolutionResult;
 import io.jenetics.engine.EvolutionStart;
+import io.jenetics.engine.Problem;
 import io.jenetics.ext.SingleNodeCrossover;
-import io.jenetics.ext.TreeGene;
-import io.jenetics.prog.ProgramChromosome;
+import io.jenetics.ext.util.Tree;
 import io.jenetics.prog.ProgramGene;
 import io.jenetics.prog.op.Op;
-import io.jenetics.util.Factory;
+import io.jenetics.prog.regression.Regression;
 import io.jenetics.util.ISeq;
 import io.jenetics.util.Seq;
 
-public class CellularEngine<G extends TreeGene<?, G>, C extends Comparable<? super C>>
-		implements Evolution<G, C>, Evaluator<G, C> {
+public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, Evaluator<ProgramGene<Double>, Double> {
 
 	private final Function<Integer, List<Integer>> connections;
-	private final Selector<G, C> selector;
-	private final SingleNodeCrossover<G, C> crossover;
-	private final Mutator<G, C> mutator;
-	private int populationSize;
-	private final Function<Genotype<G>, C> fitness;
+	private static final Selector<ProgramGene<Double>, Double> SELECTOR = new TournamentSelector<>();
+	private static final SingleNodeCrossover<ProgramGene<Double>, Double> crossover = new SingleNodeCrossover<>();
+	private static final Mutator<ProgramGene<Double>, Double> mutator = new Mutator<>();
+	private Problem<Tree<Op<Double>, ?>, ProgramGene<Double>, Double> problem;
 
-	public CellularEngine(int populationSize, final Function<Integer, List<Integer>> connections,
-			Function<Genotype<G>, C> fitness) {
+	public CellularEngine(Function<Integer, List<Integer>> connections, Regression<Double> regression) {
+		super();
 		this.connections = connections;
-		selector = new TournamentSelector<>();
-		crossover = new SingleNodeCrossover<>();
-		mutator = new Mutator<>();
-		this.populationSize = populationSize;
-		this.fitness = fitness;
+		this.problem = regression;
 	}
 
-	public EvolutionStart<ProgramGene<C>, C> start(int depth, ISeq<Op<C>> operations, ISeq<Op<C>> terminals) {
+	public EvolutionStart<ProgramGene<Double>, Double> start(final int populationSize, final long generation) {
 
-		LinkedList<Phenotype<ProgramGene<C>, C>> population = new LinkedList<>();
-		final Factory<Genotype<ProgramGene<C>>> factory = Genotype
-				.of(ProgramChromosome.of(depth, operations, terminals));
-		for (int i = 0; i < populationSize; i++) {
-			population.add(Phenotype.of(factory.newInstance(), 0));
-		}
+		ISeq<Phenotype<ProgramGene<Double>, Double>> population = problem.codec().encoding().instances()
+				.map(gt -> Phenotype.of(gt, 0, problem.fitness(gt))).limit(populationSize).collect(ISeq.toISeq());
 
-		return EvolutionStart.of(ISeq.of(population), 1);
+		return EvolutionStart.of(population, generation);
 	}
 
 	@Override
-	public EvolutionResult<G, C> evolve(EvolutionStart<G, C> start) {
-		ISeq<Phenotype<G, C>> population = eval(start.population());
-		List<Phenotype<G, C>> offspring = new ArrayList<>(population.size());
-		LinkedList<Phenotype<G, C>> neighbors = new LinkedList<>();
-		for (int i = 0; i < populationSize; i++) {
+	public EvolutionResult<ProgramGene<Double>, Double> evolve(EvolutionStart<ProgramGene<Double>, Double> start) {
+
+		List<Phenotype<ProgramGene<Double>, Double>> offsprings = new LinkedList<>();
+		final ISeq<Phenotype<ProgramGene<Double>, Double>> population = eval(start.population());
+		LinkedList<Phenotype<ProgramGene<Double>, Double>> neighbors = new LinkedList<>();
+		for (int i = 0; i < start.population().size(); i++) {
 			connections.apply(i).stream().forEach(j -> neighbors.add(population.get(j)));
-			final Phenotype<G, C> other = selector.select(Seq.of(neighbors), 1, Optimize.MINIMUM).get(0);
-			final Phenotype<G, C> that = population.get(i);
+			ISeq<Phenotype<ProgramGene<Double>, Double>> parents = SELECTOR.select(Seq.of(neighbors), 2,
+					Optimize.MINIMUM);
 
-			AltererResult<G, C> crossed = crossover.alter(Seq.of(that, other), start.generation());
+			AltererResult<ProgramGene<Double>, Double> crossed = crossover.alter(parents, start.generation());
 
-			ISeq<Phenotype<G, C>> nextGen = eval(mutator.alter(crossed.population(), start.generation()).population());
+			ISeq<Phenotype<ProgramGene<Double>, Double>> nextGen = eval(
+					mutator.alter(crossed.population(), start.generation()).population());
 
-			Phenotype<G, C> newborn = nextGen.stream().sorted(Optimize.MINIMUM.ascending()).collect(ISeq.toISeq())
-					.get(0);
+			Phenotype<ProgramGene<Double>, Double> newborn = nextGen.stream().sorted().collect(ISeq.toISeq()).get(0);
 
-			if (that.fitness().compareTo(newborn.fitness()) > 0) {
-				offspring.add(i, that);
-			} else {
-				offspring.add(newborn);
-			}
+			offsprings.add(population.get(i).fitness() > newborn.fitness() ? newborn : population.get(i));
+
 			neighbors.clear();
 		}
 
-		return EvolutionResult.of(Optimize.MINIMUM, ISeq.of(offspring), start.generation() + 1, EvolutionDurations.ZERO,
+		AltererResult<ProgramGene<Double>, Double> alter = mutator.alter(ISeq.of(offsprings), start.generation());
+
+		return EvolutionResult.of(Optimize.MINIMUM, alter.population(), start.generation() + 1, EvolutionDurations.ZERO,
 				0, 0, 0);
+
 	}
 
 	@Override
-	public ISeq<Phenotype<G, C>> eval(Seq<Phenotype<G, C>> population) {
+	public ISeq<Phenotype<ProgramGene<Double>, Double>> eval(Seq<Phenotype<ProgramGene<Double>, Double>> population) {
 
-		LinkedList<Phenotype<G, C>> evaluatedPopulation = new LinkedList<>();
+		LinkedList<Phenotype<ProgramGene<Double>, Double>> evaluatedPopulation = new LinkedList<>();
 
-		for (Phenotype<G, C> pt : population) {
+		for (Phenotype<ProgramGene<Double>, Double> pt : population) {
 			if (!pt.isEvaluated()) {
-				evaluatedPopulation.add(Phenotype.of(pt.genotype(), pt.generation(), fitness.apply(pt.genotype())));
+				evaluatedPopulation.add(Phenotype.of(pt.genotype(), pt.generation(), problem.fitness(pt.genotype())));
 			} else {
 				evaluatedPopulation.add(pt);
 			}

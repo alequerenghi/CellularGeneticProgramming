@@ -10,10 +10,13 @@ import java.util.Map;
 import cellular.CellularEngine;
 import cellular.GraphMap;
 import io.jenetics.engine.EvolutionResult;
-import io.jenetics.engine.EvolutionStart;
+import io.jenetics.engine.EvolutionStatistics;
 import io.jenetics.engine.EvolutionStream;
+import io.jenetics.engine.Limits;
+import io.jenetics.ext.util.TreeNode;
 import io.jenetics.prog.ProgramGene;
 import io.jenetics.prog.op.EphemeralConst;
+import io.jenetics.prog.op.MathExpr;
 import io.jenetics.prog.op.MathOp;
 import io.jenetics.prog.op.Op;
 import io.jenetics.prog.op.Var;
@@ -21,6 +24,7 @@ import io.jenetics.prog.regression.Error;
 import io.jenetics.prog.regression.LossFunction;
 import io.jenetics.prog.regression.Regression;
 import io.jenetics.prog.regression.Sample;
+import io.jenetics.stat.DoubleMomentStatistics;
 import io.jenetics.util.ISeq;
 
 public class SymbolicRegressionTest {
@@ -28,7 +32,7 @@ public class SymbolicRegressionTest {
 	private static final ISeq<Op<Double>> OPS = ISeq.of(MathOp.ADD, MathOp.SUB, MathOp.MUL);
 
 	private static final ISeq<Op<Double>> TMS = ISeq.of(Var.of("x", 0),
-			EphemeralConst.of(() -> (double) random().nextInt(10)));
+			EphemeralConst.of(() -> random().nextDouble(10)));
 
 	private static final List<Sample<Double>> SAMPLES = Sample.parseDoubles("""
 			-1.0, -8.0000
@@ -74,36 +78,61 @@ public class SymbolicRegressionTest {
 
 		Map<Integer, List<Integer>> connections = GRID.getConnections(100, 10);
 
-		CellularEngine<ProgramGene<Double>, Double> cellularEngine = new CellularEngine<>(100, connections::get, gt -> {
-			Double[] computed = gt.gene().apply(SAMPLES.stream().map(i -> i.argAt(0)).toArray(Double[]::new));
-			Double[] effective = SAMPLES.stream().map(Sample::result).toArray(Double[]::new);
+//		TreeFormatter formatter = TreeFormatter.TREE;
 
-			return LossFunction.mse(effective, computed);
-		});
+//		Genotype<ProgramGene<Double>> newInstance = REGRESSION.codec().encoding().newInstance();
 
-		EvolutionStream.ofEvolution(cellularEngine.start(0, OPS, TMS), i -> cellularEngine.evolve(i));
+//		@SuppressWarnings("unchecked")
+//		EphemeralConst<Double> newInstance = EphemeralConst
+//				.of((Supplier<Double> & Serializable) () -> random().nextDouble(10));
 
-		EvolutionStart<ProgramGene<Double>, Double> start = cellularEngine.start(4, OPS, TMS);
+//		System.out.println(formatter.format(newInstance.gene()));
+//
+//		System.out.println(REGRESSION.fitness(newInstance));
 
-		EvolutionResult<ProgramGene<Double>, Double> evolve = cellularEngine.evolve(start);
+//		try {
+//			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+//			ObjectOutputStream oos = new ObjectOutputStream(baos);
+//			oos.writeObject(newInstance);
+//
+//			ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray()));
+//
+//			@SuppressWarnings("unchecked")
+//			Genotype<ProgramGene<Double>> o = (Genotype<ProgramGene<Double>>) ois.readObject();
+//
+//			System.out.println(formatter.format(o.gene()));
+//
+//			System.out.println(REGRESSION.fitness(o));
+//		} catch (IOException | ClassNotFoundException e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
 
-		System.out.println(evolve.bestFitness());
+		final CellularEngine cellularEngine = new CellularEngine(connections::get, REGRESSION);
+		final EvolutionStatistics<Double, DoubleMomentStatistics> statistics = EvolutionStatistics.ofNumber();
+
+		EvolutionResult<ProgramGene<Double>, Double> er = EvolutionStream
+				.ofEvolution(() -> cellularEngine.start(100, 1), cellularEngine::evolve)
+				.limit(Limits.byFitnessThreshold(0.1)).peek(statistics)
+				.collect(EvolutionResult.toBestEvolutionResult());
 
 //		final Engine<ProgramGene<Double>, Double> engine = Engine.builder(REGRESSION).minimizing()
 //				.alterers(new SingleNodeCrossover<>(0.1), new Mutator<>()).build();
 //
 //		final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream().limit(Limits.byFitnessThreshold(0.01))
-//				.collect(EvolutionResult.toBestEvolutionResult());
-//
-//		final ProgramGene<Double> gene = er.bestPhenotype().genotype().gene();
-//
-//		TreeNode<Op<Double>> tree = gene.toTreeNode();
-//
-//		MathExpr.rewrite(tree);
-//
-//		System.out.println("G" + er.totalGenerations());
-//		System.out.println("F" + new MathExpr(tree));
-//		System.out.println("E" + REGRESSION.error(tree));
+//				.limit(100).collect(EvolutionResult.toBestEvolutionResult());
 
+		final ProgramGene<Double> gene = er.bestPhenotype().genotype().gene();
+
+		TreeNode<Op<Double>> tree = gene.toTreeNode();
+
+		MathExpr.rewrite(tree);
+
+		System.out.println("G" + er.totalGenerations());
+		System.out.println("F" + new MathExpr(tree));
+		System.out.println("V" + gene.isValid());
+		System.out.println("E" + REGRESSION.error(tree));
+
+		System.out.println(statistics);
 	}
 }
