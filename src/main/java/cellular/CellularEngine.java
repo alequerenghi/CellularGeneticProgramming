@@ -2,6 +2,11 @@ package cellular;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.Future;
 
 import io.jenetics.Alterer;
 import io.jenetics.AltererResult;
@@ -30,6 +35,7 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
   private final Selector<ProgramGene<Double>, Double> selector;
   private final Alterer<ProgramGene<Double>, Double> alterer;
   private Problem<Tree<Op<Double>, ?>, ProgramGene<Double>, Double> problem;
+  private ExecutorService pool;
 
   public CellularEngine(GraphMap connections, Regression<Double> regression) {
     super();
@@ -38,6 +44,7 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
     selector = new TournamentSelector<>();
     SingleNodeCrossover<ProgramGene<Double>, Double> crossover = new SingleNodeCrossover<>(1.0);
     alterer = crossover.andThen(new Mutator<>(1.0));
+    pool = ForkJoinPool.commonPool();
   }
 
   public EvolutionStart<ProgramGene<Double>, Double> start(final int populationSize, final long generation) {
@@ -59,15 +66,17 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
     int alterCount = 0;
 
     final ISeq<Phenotype<ProgramGene<Double>, Double>> population = eval(start.population());
-    final LinkedList<Phenotype<ProgramGene<Double>, Double>> neighbors = new LinkedList<>();
-    final ArrayList<Phenotype<ProgramGene<Double>, Double>> offsprings = new ArrayList<>(population.size());
+    final List<Phenotype<ProgramGene<Double>, Double>> offsprings = new ArrayList<>(population.size());
 
     for (int i = 0; i < start.population()
         .size(); i++) {
+      final List<Phenotype<ProgramGene<Double>, Double>> neighbors = new LinkedList<>();
       connections.getConnections()
           .get(i)
           .stream()
           .forEach(j -> neighbors.add(population.get(j)));
+//      CompletableFuture<ISeq<Phenotype<ProgramGene<Double>, Double>>> selected = CompletableFuture
+//          .supplyAsync(() -> selector.select(ISeq.of(neighbors), 2, Optimize.MINIMUM));
       ISeq<Phenotype<ProgramGene<Double>, Double>> parents = selector.select(ISeq.of(neighbors), 2, Optimize.MINIMUM);
       AltererResult<ProgramGene<Double>, Double> altered = alterer.alter(parents, start.generation());
       alterCount += altered.alterations();
@@ -82,34 +91,37 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
       } else {
         offsprings.add(population.get(i));
       }
-      neighbors.clear();
     }
     return EvolutionResult.of(Optimize.MINIMUM, ISeq.of(offsprings), start.generation() + 1, EvolutionDurations.ZERO,
         killCount, invalidCount, alterCount);
-
   }
-
-//	return population.parallelStream().map(pt -> {
-//	if (!pt.isEvaluated()) {
-//		return Phenotype.of(pt.genotype(), pt.generation(), problem.fitness(pt.genotype()));
-//	} else {
-//		return pt;
-//	}
-//}).collect(ISeq.toISeq());
 
   @Override
   public ISeq<Phenotype<ProgramGene<Double>, Double>> eval(Seq<Phenotype<ProgramGene<Double>, Double>> population) {
 
-    ArrayList<Phenotype<ProgramGene<Double>, Double>> evaluated = new ArrayList<>(population.size());
-    for (Phenotype<ProgramGene<Double>, Double> pt : population) {
-
-      if (!pt.isEvaluated()) {
-        Double fitnessValue = problem.fitness(pt.genotype());
-        evaluated.add(pt.withFitness(fitnessValue));
-      } else {
-        evaluated.add(pt);
-      }
+    List<Future<Phenotype<ProgramGene<Double>, Double>>> futures = new ArrayList<>(population.size());
+    for (Phenotype<ProgramGene<Double>, Double> phenotype : population) {
+      futures.add(pool.submit(() -> {
+        if (phenotype.isEvaluated()) {
+          return phenotype;
+        } else {
+          Double fitnessValue = problem.fitness(phenotype.genotype());
+          return phenotype.withFitness(fitnessValue);
+        }
+      }));
     }
-    return ISeq.of(evaluated);
+    List<Phenotype<ProgramGene<Double>, Double>> evaluated = new ArrayList<>(population.size());
+    try {
+      for (Future<Phenotype<ProgramGene<Double>, Double>> future : futures) {
+        evaluated.add(future.get());
+      }
+      return ISeq.of(evaluated);
+    } catch (InterruptedException e) {
+      Thread.currentThread()
+          .interrupt();
+      throw new RuntimeException(e);
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    }
   }
 }

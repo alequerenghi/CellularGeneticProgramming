@@ -12,11 +12,13 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
 import com.sun.tools.javac.Main;
@@ -31,7 +33,7 @@ import io.jenetics.engine.EvolutionStream;
 import io.jenetics.ext.util.Tree;
 import io.jenetics.ext.util.TreeNode;
 import io.jenetics.prog.ProgramGene;
-import io.jenetics.prog.op.Const;
+import io.jenetics.prog.op.EphemeralConst;
 import io.jenetics.prog.op.MathExpr;
 import io.jenetics.prog.op.MathOp;
 import io.jenetics.prog.op.Op;
@@ -47,42 +49,63 @@ public class SymbolicRegressionTest {
   private static final ISeq<Op<Double>> OPS = ISeq.of(MathOp.ADD, MathOp.SUB, MathOp.MUL, MathOp.DIV, MathOp.SQRT,
       MathOp.SIN, MathOp.COS);
 
+  private static final List<GraphMap> GRIDS = List.of(GraphMaps.grid(100));// , GraphMaps.barabasiAlbert(100, 5),
+//      GraphMaps.multipleInAndOutNodes(100, .3, .3, 5));
+
   public static void main(String... args) {
 
     try {
 
-      final Regression<Double> regression = generateProblem("feynman_I_10_7.tsv.gz");
+      Set<File> inputFiles = Stream.of(new File(Main.class.getClassLoader()
+          .getResource("data")
+          .getFile()).listFiles())
+          .filter(f -> !f.isDirectory())
+          .collect(Collectors.toSet());
 
-      String output = evolve(regression, GraphMaps.grid(100));
-//			final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream().limit(50).peek(statistics)
-//					.collect(EvolutionResult.toBestEvolutionResult());
-//
-//			final ProgramGene<Double> gene = er.bestPhenotype().genotype().gene();
-//
-//			TreeNode<Op<Double>> tree = gene.toTreeNode();
-//
-//			MathExpr.rewrite(tree);
+      for (File file : inputFiles) {
+        StringBuilder output = new StringBuilder();
 
-      writeOutput(output, // statistics.tsoString(),
-          "feynman_I_10_7.txt");
-    } catch (IOException e) {
+        final Regression<Double> regression = generateProblem(file);
+
+        for (GraphMap grid : GRIDS) {
+
+          output.append("\n\n")
+              .append(evolve(regression, grid));
+        }
+//        final EvolutionResult<ProgramGene<Double>, Double> er = engine.stream()
+//            .limit(50)
+//            .peek(statistics)
+//            .collect(EvolutionResult.toBestEvolutionResult());
+//
+//        final ProgramGene<Double> gene = er.bestPhenotype()
+//            .genotype()
+//            .gene();
+//
+//        TreeNode<Op<Double>> tree = gene.toTreeNode();
+//
+//        MathExpr.rewrite(tree);
+        writeOutput(output.toString(), file);
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread()
+          .interrupt();
+      e.printStackTrace();
+    } catch (IOException | ExecutionException e) {
       e.printStackTrace();
     }
   }
 
-  private static String evolve(Regression<Double> problem, GraphMap connections) {
+  private static String evolve(Regression<Double> problem, GraphMap connections)
+      throws InterruptedException, ExecutionException {
     List<Future<EvolutionResult<ProgramGene<Double>, Double>>> futures = new ArrayList<>(10);
-    try (ExecutorService pool = Executors.newFixedThreadPool(1)) {
+    try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
       for (int i = 0; i < 10; i++) {
         futures.add(pool.submit(() -> {
           CellularEngine engine = new CellularEngine(connections, problem);
-          EvolutionResult<ProgramGene<Double>, Double> er = EvolutionStream
-              .ofEvolution(() -> engine.start(connections.getConnections()
-                  .size(), 1), engine::evolve)
+          return EvolutionStream.ofEvolution(() -> engine.start(connections.getConnections()
+              .size(), 1), engine::evolve)
               .limit(30)
               .collect(EvolutionResult.toBestEvolutionResult());
-          engine.shutdown();
-          return er;
         }));
       }
 
@@ -108,23 +131,13 @@ public class SymbolicRegressionTest {
 
       return String.format("Best fitness: %.5f%nAverage fitness: %.5f%nBest individual: %s", bestFitness, avgFitness,
           new MathExpr(tree).toString());
-    } catch (ExecutionException e) {
-      e.printStackTrace();
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-      Thread.currentThread()
-          .interrupt();
     }
-    return "";
   }
 
-  private static Regression<Double> generateProblem(String fileName) throws IOException {
-    String filepath = Objects.requireNonNull(Main.class.getClassLoader()
-        .getResource(fileName))
-        .getFile();
+  private static Regression<Double> generateProblem(File file) throws IOException {
 
-    try (BufferedReader br = new BufferedReader(
-        new InputStreamReader(new GZIPInputStream(new FileInputStream(filepath))))) {
+    try (
+        BufferedReader br = new BufferedReader(new InputStreamReader(new GZIPInputStream(new FileInputStream(file))))) {
       String header = br.readLine();
 
       String[] vars = header.split("\t");
@@ -133,7 +146,7 @@ public class SymbolicRegressionTest {
       for (int i = 0; i < vars.length - 1; i++) {
         terminals.add(Var.of(vars[i], i));
       }
-      terminals.add(Const.of(random().nextDouble(10)));
+      terminals.add(EphemeralConst.of(() -> random().nextDouble(10)));
 
       final String csvData = br.readAllAsString()
           .replace("\t", ", ");
@@ -145,23 +158,20 @@ public class SymbolicRegressionTest {
     }
   }
 
-  private static void writeOutput(String output, String outFilename) {
-    try {
-      File dataDir = new File("data");
+  private static void writeOutput(String output, File file) throws IOException {
+    File dataDir = new File("outputs");
 
-      if (!dataDir.exists() && !dataDir.mkdir()) {
-        throw new IOException("Impossible to craete 'data' foler");
-      }
-
-      File outFile = new File(dataDir, outFilename);
-      if (!outFile.exists() && !outFile.createNewFile()) {
-        throw new IOException(String.format("Impossible to create '%s'", outFilename));
-      }
-      try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile)))) {
-        bw.write(output);
-      }
-    } catch (IOException e) {
-      e.printStackTrace();
+    if (!dataDir.exists() && !dataDir.mkdir()) {
+      throw new IOException("Impossible to craete 'data' foler");
     }
+
+    File outFile = new File(dataDir, file.getName());
+    if (!outFile.exists() && !outFile.createNewFile()) {
+      throw new IOException(String.format("Impossible to create '%s'", file));
+    }
+    try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile)))) {
+      bw.write(output);
+    }
+
   }
 }

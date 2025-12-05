@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.random.RandomGenerator;
+import java.util.stream.Collectors;
 
 import io.jenetics.util.RandomRegistry;
 
@@ -71,7 +72,7 @@ public class GraphMaps {
             continue; // avoid self-loop
 
           graph.get(from)
-              .add(to);
+               .add(to);
         }
       }
 
@@ -85,7 +86,7 @@ public class GraphMaps {
             continue;
 
           graph.get(from)
-              .add(hub);
+               .add(hub);
 
         }
       }
@@ -93,77 +94,79 @@ public class GraphMaps {
     };
   }
 
-  public static GraphMap barabasiAlbert(int n, int m0, int m) {
+  public static GraphMap barabasiAlbert(int graphSize, int m) {
+    int m0 = RNG.nextInt(m, 2 * m);
     return () -> {
       Map<Integer, List<Integer>> g = new HashMap<>();
 
-      // Initialize adjacency lists
-      for (int i = 0; i < n; i++) g.put(i, new ArrayList<>());
-
-      // Start with m0 fully connected nodes
       for (int i = 0; i < m0; i++) {
+        g.put(i, new ArrayList<>());
         for (int j = 0; j < m0; j++) {
-          if (i != j)
+          if (i != j) {
             g.get(i)
-                .add(j);
+             .add(j);
+            g.get(j)
+             .add(i);
+          }
         }
       }
 
-      // Degree list for preferential attachment
-      List<Integer> degrees = new ArrayList<>();
-      for (int i = 0; i < m0; i++) {
-        for (int j = 0; j < g.get(i)
-            .size(); j++) {
-          degrees.add(i);
+      while (g.size() < graphSize) {
+        int current = g.size();
+        g.put(current, new ArrayList<>());
+        List<Integer> connections = g.values()
+                                     .stream()
+                                     .map(List::size)
+                                     .collect(Collectors.toCollection(ArrayList::new));
+        int nConnections = connections.stream()
+                                      .mapToInt(Integer::intValue)
+                                      .sum();
+        for (int i = 0; i < m; i++) {
+          int chosen = proportionalSelection(connections, nConnections);
+          g.get(chosen)
+           .add(current);
+          g.get(current)
+           .add(chosen);
+          connections.set(chosen, connections.get(chosen) + 1);
+          connections.set(current, connections.get(current) + 1);
+          nConnections += 2;
         }
       }
-      // Add remaining nodes
-      for (int newNode = m0; newNode < n; newNode++) {
-
-        Set<Integer> targets = new HashSet<>();
-        while (targets.size() < m) {
-          int chosen = degrees.get(RNG.nextInt(degrees.size()));
-          if (chosen != newNode)
-            targets.add(chosen);
-        }
-
-        for (int t : targets) {
-          g.get(newNode)
-              .add(t);
-          degrees.add(newNode);
-          degrees.add(t);
-        }
-      }
-
       return g;
     };
-
   }
 
-  public static GraphMap wattsStrogatz(int n, int k, double beta) {
+  private static int proportionalSelection(List<Integer> weights, int weightsSum) {
+    double r = RNG.nextDouble() * weightsSum;
+    int i;
+    for (i = 0; i < weights.size() && r > 0; i++) {
+      r -= weights.get(i);
+    }
+    return i;
+  }
+
+  public static GraphMap wattsStrogatz(int graphSize, int k, double beta) {
     return () -> {
       Map<Integer, List<Integer>> g = new HashMap<>();
 
-      for (int i = 0; i < n; i++) g.put(i, new ArrayList<>());
-
-      // Ring lattice
-      for (int i = 0; i < n; i++) {
+      for (int i = 0; i < graphSize; i++) {
+        g.put(i, new ArrayList<>());
         for (int j = 1; j <= k / 2; j++) {
-          int nei = (i + j) % n;
+          int neighbor = (i + j) % graphSize;
           g.get(i)
-              .add(nei);
+           .add(neighbor);
         }
       }
 
-      // Rewire edges
-      for (int i = 0; i < n; i++) {
+      for (int i = 0; i < graphSize; i++) {
+
         List<Integer> outs = g.get(i);
 
         for (int idx = 0; idx < outs.size(); idx++) {
           if (RNG.nextDouble() < beta) {
             int newTarget;
             do {
-              newTarget = RNG.nextInt(n);
+              newTarget = RNG.nextInt(graphSize);
             } while (newTarget == i || outs.contains(newTarget));
 
             outs.set(idx, newTarget);
@@ -178,13 +181,12 @@ public class GraphMaps {
     return () -> {
       Map<Integer, List<Integer>> g = new HashMap<>();
 
-      for (int i = 0; i < n; i++) g.put(i, new ArrayList<>());
-
       for (int i = 0; i < n; i++) {
+        g.put(i, new ArrayList<>());
         for (int j = 0; j < n; j++) {
           if (i != j && RNG.nextDouble() < p) {
             g.get(i)
-                .add(j);
+             .add(j);
           }
         }
       }
@@ -193,29 +195,29 @@ public class GraphMaps {
     };
   }
 
-  public static GraphMap layeredDAG(int layers, int nodesPerLayer, double forwardProb) {
+  public static GraphMap layeredDAG(final int layers, final int nodesPerLayer, final double forwardProb) {
     return () -> {
       int total = layers * nodesPerLayer;
       Map<Integer, List<Integer>> g = new HashMap<>();
 
-      for (int i = 0; i < total; i++) g.put(i, new ArrayList<>());
+      for (int i = 0; i < total; i++) {
+        g.put(i, new ArrayList<>());
+      }
 
       for (int l = 0; l < layers - 1; l++) {
         for (int i = l * nodesPerLayer; i < (l + 1) * nodesPerLayer; i++) {
           for (int j = (l + 1) * nodesPerLayer; j < (l + 2) * nodesPerLayer; j++) {
             if (RNG.nextDouble() < forwardProb) {
               g.get(i)
-                  .add(j);
+               .add(j);
             }
           }
         }
       }
-
       return g;
     };
   }
 
-  /** Helper to pick a random subset of nodes */
   private static Set<Integer> pickRandomSet(int max, int count) {
     Set<Integer> set = new HashSet<>();
     while (set.size() < count) {
