@@ -1,8 +1,5 @@
 package cellular;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.LinkedList;
 
@@ -33,8 +30,6 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
   private final Selector<ProgramGene<Double>, Double> selector;
   private final Alterer<ProgramGene<Double>, Double> alterer;
   private Problem<Tree<Op<Double>, ?>, ProgramGene<Double>, Double> problem;
-  private ObjectOutputStream oos;
-  private ByteArrayOutputStream baos;
 
   public CellularEngine(GraphMap connections, Regression<Double> regression) {
     super();
@@ -43,20 +38,6 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
     selector = new TournamentSelector<>();
     SingleNodeCrossover<ProgramGene<Double>, Double> crossover = new SingleNodeCrossover<>(1.0);
     alterer = crossover.andThen(new Mutator<>(1.0));
-    try {
-      baos = new ByteArrayOutputStream();
-      oos = new ObjectOutputStream(baos);
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
-  }
-
-  public void shutdown() {
-    try {
-      oos.close();
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
   }
 
   public EvolutionStart<ProgramGene<Double>, Double> start(final int populationSize, final long generation) {
@@ -103,10 +84,6 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
       }
       neighbors.clear();
     }
-    System.out.println(offsprings.stream()
-        .mapToDouble(Phenotype::fitness)
-        .sorted()
-        .toArray()[0]);
     return EvolutionResult.of(Optimize.MINIMUM, ISeq.of(offsprings), start.generation() + 1, EvolutionDurations.ZERO,
         killCount, invalidCount, alterCount);
 
@@ -135,43 +112,4 @@ public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, E
     }
     return ISeq.of(evaluated);
   }
-
-//  @SuppressWarnings("unchecked")
-//  private AltererResult<ProgramGene<Double>, Double> alterSingle(ISeq<Phenotype<ProgramGene<Double>, Double>> parents) {
-//    try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-//      ObjectOutputStream oos = new ObjectOutputStream(baos);
-//      oos.writeObject(parents);
-//      try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray()))) {
-//        ISeq<Phenotype<ProgramGene<Double>, Double>> copied = (ISeq<Phenotype<ProgramGene<Double>, Double>>) ois
-//            .readObject();
-//
-//        AltererResult<ProgramGene<Double>, Double> altered = alterer.alter(parents, copied.get(0)
-//            .generation());
-//
-//        if (parents.stream()
-//            .map(Phenotype::genotype)
-//            .map(Genotype::gene)
-//            .allMatch(parent -> copied.stream()
-//                .map(Phenotype::genotype)
-//                .map(Genotype::gene)
-//                .anyMatch(parent::equals))) {
-//          parents.stream()
-//              .map(Phenotype::genotype)
-//              .map(Genotype::gene)
-//              .map(ProgramGene::toTreeNode)
-//              .forEach(System.out::println);
-//          copied.stream()
-//              .map(Phenotype::genotype)
-//              .map(Genotype::gene)
-//              .map(ProgramGene::toTreeNode)
-//              .forEach(System.out::println);
-//
-//        }
-//        return altered;
-//      }
-//    } catch (IOException | ClassNotFoundException e) {
-//      e.printStackTrace();
-//    }
-//    return null;
-//  }
 }
