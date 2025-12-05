@@ -1,12 +1,10 @@
 package cellular;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 import io.jenetics.Alterer;
 import io.jenetics.AltererResult;
@@ -31,109 +29,149 @@ import io.jenetics.util.Seq;
 
 public class CellularEngine implements Evolution<ProgramGene<Double>, Double>, Evaluator<ProgramGene<Double>, Double> {
 
-	private final GraphMap connections;
-	private final Selector<ProgramGene<Double>, Double> selector;
-	private final Alterer<ProgramGene<Double>, Double> alterer;
-	private Problem<Tree<Op<Double>, ?>, ProgramGene<Double>, Double> problem;
+  private final GraphMap connections;
+  private final Selector<ProgramGene<Double>, Double> selector;
+  private final Alterer<ProgramGene<Double>, Double> alterer;
+  private Problem<Tree<Op<Double>, ?>, ProgramGene<Double>, Double> problem;
+  private ObjectOutputStream oos;
+  private ByteArrayOutputStream baos;
 
-	public CellularEngine(GraphMap connections, Regression<Double> regression) {
-		super();
-		this.connections = connections;
-		this.problem = regression;
-		selector = new TournamentSelector<>();
-		SingleNodeCrossover<ProgramGene<Double>, Double> crossover = new SingleNodeCrossover<>();
-		alterer = crossover.andThen(new Mutator<>());
-	}
+  public CellularEngine(GraphMap connections, Regression<Double> regression) {
+    super();
+    this.connections = connections;
+    this.problem = regression;
+    selector = new TournamentSelector<>();
+    SingleNodeCrossover<ProgramGene<Double>, Double> crossover = new SingleNodeCrossover<>(1.0);
+    alterer = crossover.andThen(new Mutator<>(1.0));
+    try {
+      baos = new ByteArrayOutputStream();
+      oos = new ObjectOutputStream(baos);
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
 
-	public EvolutionStart<ProgramGene<Double>, Double> start(final int populationSize, final long generation) {
+  public void shutdown() {
+    try {
+      oos.close();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
 
-		ISeq<Phenotype<ProgramGene<Double>, Double>> population = problem.codec().encoding().instances()
-				.map(gt -> Phenotype.of(gt, 0, problem.fitness(gt))).limit(populationSize).collect(ISeq.toISeq());
+  public EvolutionStart<ProgramGene<Double>, Double> start(final int populationSize, final long generation) {
 
-		return EvolutionStart.of(population, generation);
-	}
+    ISeq<Phenotype<ProgramGene<Double>, Double>> population = problem.codec()
+        .encoding()
+        .instances()
+        .map(gt -> Phenotype.of(gt, 0, problem.fitness(gt)))
+        .limit(populationSize)
+        .collect(ISeq.toISeq());
 
-	@Override
-	public EvolutionResult<ProgramGene<Double>, Double> evolve(EvolutionStart<ProgramGene<Double>, Double> start) {
+    return EvolutionStart.of(population, generation);
+  }
 
-		int invalidCount = 0;
-		int killCount = 0;
-		int alterCount = 0;
+  @Override
+  public EvolutionResult<ProgramGene<Double>, Double> evolve(EvolutionStart<ProgramGene<Double>, Double> start) {
+    int invalidCount = 0;
+    int killCount = 0;
+    int alterCount = 0;
 
-		List<Phenotype<ProgramGene<Double>, Double>> offsprings = new LinkedList<>();
-		final ISeq<Phenotype<ProgramGene<Double>, Double>> population = eval(start.population());
-		LinkedList<Phenotype<ProgramGene<Double>, Double>> neighbors = new LinkedList<>();
-		for (int i = 0; i < start.population().size(); i++) {
-			connections.getConnections().get(i).stream().forEach(j -> neighbors.add(population.get(j)));
-			ISeq<Phenotype<ProgramGene<Double>, Double>> parents = selector.select(Seq.of(neighbors), 2,
-					Optimize.MINIMUM);
+    final ISeq<Phenotype<ProgramGene<Double>, Double>> population = eval(start.population());
+    final LinkedList<Phenotype<ProgramGene<Double>, Double>> neighbors = new LinkedList<>();
+    final ArrayList<Phenotype<ProgramGene<Double>, Double>> offsprings = new ArrayList<>(population.size());
 
-			AltererResult<ProgramGene<Double>, Double> crossed = alterer.alter(parents, start.generation());
+    for (int i = 0; i < start.population()
+        .size(); i++) {
+      connections.getConnections()
+          .get(i)
+          .stream()
+          .forEach(j -> neighbors.add(population.get(j)));
+      ISeq<Phenotype<ProgramGene<Double>, Double>> parents = selector.select(ISeq.of(neighbors), 2, Optimize.MINIMUM);
+      AltererResult<ProgramGene<Double>, Double> altered = alterer.alter(parents, start.generation());
+      alterCount += altered.alterations();
+      Phenotype<ProgramGene<Double>, Double> newborn = eval(altered.population()).stream()
+          .sorted()
+          .toList()
+          .get(0);
+      if (population.get(i)
+          .fitness() > newborn.fitness()) {
+        offsprings.add(newborn);
+        killCount++;
+      } else {
+        offsprings.add(population.get(i));
+      }
+      neighbors.clear();
+    }
+    System.out.println(offsprings.stream()
+        .mapToDouble(Phenotype::fitness)
+        .sorted()
+        .toArray()[0]);
+    return EvolutionResult.of(Optimize.MINIMUM, ISeq.of(offsprings), start.generation() + 1, EvolutionDurations.ZERO,
+        killCount, invalidCount, alterCount);
 
-			alterCount += crossed.alterations();
+  }
 
-			ISeq<Phenotype<ProgramGene<Double>, Double>> nextGen = eval(crossed.population());
+//	return population.parallelStream().map(pt -> {
+//	if (!pt.isEvaluated()) {
+//		return Phenotype.of(pt.genotype(), pt.generation(), problem.fitness(pt.genotype()));
+//	} else {
+//		return pt;
+//	}
+//}).collect(ISeq.toISeq());
 
-			Phenotype<ProgramGene<Double>, Double> newborn = nextGen.stream().sorted().collect(ISeq.toISeq()).get(0);
+  @Override
+  public ISeq<Phenotype<ProgramGene<Double>, Double>> eval(Seq<Phenotype<ProgramGene<Double>, Double>> population) {
 
-			if (population.get(i).fitness() > newborn.fitness()) {
-				offsprings.add(newborn);
-				killCount++;
-			} else {
-				offsprings.add(population.get(i));
-			}
+    ArrayList<Phenotype<ProgramGene<Double>, Double>> evaluated = new ArrayList<>(population.size());
+    for (Phenotype<ProgramGene<Double>, Double> pt : population) {
 
-			neighbors.clear();
-		}
+      if (!pt.isEvaluated()) {
+        Double fitnessValue = problem.fitness(pt.genotype());
+        evaluated.add(pt.withFitness(fitnessValue));
+      } else {
+        evaluated.add(pt);
+      }
+    }
+    return ISeq.of(evaluated);
+  }
 
-//		for (int i = 0; i < offsprings.size(); i++) {
-//			if (!offsprings.get(i).isValid()) {
-//				invalidCount++;
-//				Phenotype<ProgramGene<Double>, Double> newborn = Phenotype.of(problem.codec().encoding().newInstance(),
-//						start.generation() + 1);
-//				offsprings.set(i, newborn.withFitness(problem.fitness(newborn.genotype())));
-//			}
-//		}
-
-		return EvolutionResult.of(Optimize.MINIMUM, ISeq.of(offsprings), start.generation() + 1,
-				EvolutionDurations.ZERO, killCount, invalidCount, alterCount);
-
-	}
-
-	@Override
-	public ISeq<Phenotype<ProgramGene<Double>, Double>> eval(Seq<Phenotype<ProgramGene<Double>, Double>> population) {
-
-//		return population.parallelStream().map(pt -> {
-//			if (!pt.isEvaluated()) {
-//				return Phenotype.of(pt.genotype(), pt.generation(), problem.fitness(pt.genotype()));
-//			} else {
-//				return pt;
-//			}
-//		}).collect(ISeq.toISeq());
-
-		try (ExecutorService pool = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())) {
-			List<Future<Phenotype<ProgramGene<Double>, Double>>> futures = new ArrayList<>(population.size());
-			for (Phenotype<ProgramGene<Double>, Double> pt : population) {
-				futures.add(pool.submit(() -> {
-					if (!pt.isEvaluated()) {
-						Double fitnessValue = problem.fitness(pt.genotype());
-						return Phenotype.of(pt.genotype(), pt.generation(), fitnessValue);
-					} else {
-						return pt;
-					}
-				}));
-			}
-			ArrayList<Phenotype<ProgramGene<Double>, Double>> evaluatedPopulation = new ArrayList<>(population.size());
-			for (Future<Phenotype<ProgramGene<Double>, Double>> future : futures) {
-				evaluatedPopulation.add(future.get());
-			}
-			return ISeq.of(evaluatedPopulation);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-			Thread.currentThread().interrupt();
-		} catch (ExecutionException e) {
-			e.printStackTrace();
-		}
-		return null;
-	}
+//  @SuppressWarnings("unchecked")
+//  private AltererResult<ProgramGene<Double>, Double> alterSingle(ISeq<Phenotype<ProgramGene<Double>, Double>> parents) {
+//    try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+//      ObjectOutputStream oos = new ObjectOutputStream(baos);
+//      oos.writeObject(parents);
+//      try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(baos.toByteArray()))) {
+//        ISeq<Phenotype<ProgramGene<Double>, Double>> copied = (ISeq<Phenotype<ProgramGene<Double>, Double>>) ois
+//            .readObject();
+//
+//        AltererResult<ProgramGene<Double>, Double> altered = alterer.alter(parents, copied.get(0)
+//            .generation());
+//
+//        if (parents.stream()
+//            .map(Phenotype::genotype)
+//            .map(Genotype::gene)
+//            .allMatch(parent -> copied.stream()
+//                .map(Phenotype::genotype)
+//                .map(Genotype::gene)
+//                .anyMatch(parent::equals))) {
+//          parents.stream()
+//              .map(Phenotype::genotype)
+//              .map(Genotype::gene)
+//              .map(ProgramGene::toTreeNode)
+//              .forEach(System.out::println);
+//          copied.stream()
+//              .map(Phenotype::genotype)
+//              .map(Genotype::gene)
+//              .map(ProgramGene::toTreeNode)
+//              .forEach(System.out::println);
+//
+//        }
+//        return altered;
+//      }
+//    } catch (IOException | ClassNotFoundException e) {
+//      e.printStackTrace();
+//    }
+//    return null;
+//  }
 }
