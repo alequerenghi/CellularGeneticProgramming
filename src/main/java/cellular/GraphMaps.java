@@ -5,15 +5,13 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
-import java.util.random.RandomGenerator;
 import java.util.stream.Collectors;
-
-import io.jenetics.util.RandomRegistry;
 
 public class GraphMaps {
 
-	private static final RandomGenerator RNG = RandomRegistry.random();
+	private static final Random RNG = new Random(42);
 
 	private GraphMaps() {
 		// nothing
@@ -58,7 +56,7 @@ public class GraphMaps {
 
 			if (outHubs.contains(from)) {
 				// Out-hubs have more outgoing edges
-				degree = avgDegree * 4;
+				degree = Math.powExact(avgDegree, 2);
 			} else {
 				// Normal nodes
 				degree = avgDegree;
@@ -75,7 +73,7 @@ public class GraphMaps {
 
 		// Add extra incoming edges for in-hubs
 		for (int hub : inHubs) {
-			int extraIn = avgDegree * 4;
+			int extraIn = Math.powExact(avgDegree, 2);
 
 			for (int k = 0; k < extraIn; k++) {
 				int from = RNG.nextInt(numNodes);

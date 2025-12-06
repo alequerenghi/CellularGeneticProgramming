@@ -1,3 +1,0 @@
-Best fitness: 0.01139
-Average fitness: 0.02861
-Best individual: m_0 + sin(((sqrt(v^2.0)/c)*(sqrt(v)/1.6030962689353845))*(v - sin(v)))

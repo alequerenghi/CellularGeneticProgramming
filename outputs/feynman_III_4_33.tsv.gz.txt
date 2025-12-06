@@ -1,0 +1,47 @@
+
+
+Structure: grid
+
+Best fitness: 24.10310
+Average fitness: 34.75209
+Best individual: sqrt(((kb/0.3664403610207323 + (h + T)) + ((T - h) + 40.033236237190906)) + (23.76288203345393 + sqrt(kb + 2.403377208216211)))
+
+
+
+Structure: Barbasi Albert
+
+Best fitness: 11.09687
+Average fitness: 29.22663
+Best individual: sqrt((h + T)/2.651696937844893 + sqrt(kb*0.6840890599400651)) + sqrt((exp(kb) + (kb - T)) + T^2.0*sqrt(h))
+
+
+
+Structure: Multiple in- and out-nodes
+
+Best fitness: 4.78297
+Average fitness: 26.02298
+Best individual: sqrt((exp(T)/(9.693076561507706/kb))*(1.0 + (omega + kb)) - (1.5308612473197845 + (omega - 4.446717193700081))/exp(h + 6.279382128610205))
+
+
+
+Structure: Erdos Renyi
+
+Best fitness: 3.26074
+Average fitness: 43.98840
+Best individual: sqrt(sqrt(exp((T + kb) + sqrt(kb))))
+
+
+
+Structure: Watts Strogatz
+
+Best fitness: 12.89890
+Average fitness: 33.38919
+Best individual: sqrt(sqrt(kb/T + exp(kb))) + ((omega/1.3753177963423058 + sqrt(T)) + (1.0 - omega/T))*sqrt(exp(kb/omega))
+
+
+
+Standard GP:
+
+Best fitness: 0.59427
+Average fitness: 5.80720
+Best individual: kb*T

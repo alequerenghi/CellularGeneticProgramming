@@ -80,30 +80,24 @@ public class CellularEngine<G extends Gene<?, G>, C extends Comparable<? super C
     int alterCount = 0;
 
     try {
-      final ISeq<Phenotype<G, C>> population = eval(start.population());
-
-      final int popSize = start.population()
-                               .size();
-
-      final FilterResult<G, C> filteredPopulation = filter(population, start.generation());
-      final List<Future<Phenotype<G, C>>> futures = new ArrayList<>(popSize);
-      for (int i = 0; i < popSize; i++) {
+      final FilterResult<G, C> filteredPopulation = filter(start.population(), start.generation());
+      final Seq<Phenotype<G, C>> population = eval(filteredPopulation.population());
+      final List<Future<Phenotype<G, C>>> futures = new ArrayList<>(populationSize());
+      for (int i = 0; i < populationSize(); i++) {
         final List<Phenotype<G, C>> neighbors = new LinkedList<>();
         connections.getConnections(i)
                    .stream()
-                   .forEach(
-                       j -> neighbors.add(
-                           filteredPopulation.population()
-                                             .get(j)));
-        futures.add(pool.submit(() -> evolveSingle(start, neighbors)));
+                   .forEach(j -> neighbors.add(population.get(j)));
+        final Seq<Phenotype<G, C>> parents = neighbors.isEmpty() ? ISeq.of(population.get(i)) : ISeq.of(neighbors);
+        futures.add(pool.submit(() -> evolveSingle(parents, start.generation())));
       }
-      final List<Phenotype<G, C>> offsprings = new ArrayList<>(popSize);
+      final List<Phenotype<G, C>> offsprings = new ArrayList<>(populationSize());
       for (Future<Phenotype<G, C>> future : futures) {
         offsprings.add(future.get());
       }
 
-      ISeq<Phenotype<G, C>> evaluatedOffsprings = eval(ISeq.of(offsprings));
-      AltererResult<G, C> newGeneration = replaceOld(filteredPopulation.population(), evaluatedOffsprings);
+      final Seq<Phenotype<G, C>> evaluatedOffsprings = eval(ISeq.of(offsprings));
+      final AltererResult<G, C> newGeneration = replaceOld(population, evaluatedOffsprings);
 
       killCount += filteredPopulation.killCount();
       invalidCount += filteredPopulation.invalidCount();
@@ -125,15 +119,14 @@ public class CellularEngine<G extends Gene<?, G>, C extends Comparable<? super C
     } catch (ExecutionException e) {
       throw new RuntimeException(e);
     }
-
   }
 
   private AltererResult<G, C> replaceOld(
-      final ISeq<Phenotype<G, C>> population,
-      final ISeq<Phenotype<G, C>> evaluatedOffsprings) {
+      final Seq<Phenotype<G, C>> population,
+      final Seq<Phenotype<G, C>> evaluatedOffsprings) {
     int alterCount = 0;
     Comparator<C> comparator = optimize.descending();
-    MSeq<Phenotype<G, C>> offsprings = MSeq.of(population);
+    MSeq<Phenotype<G, C>> offsprings = population.asMSeq();
     for (int i = 0; i < populationSize(); i++) {
       if (comparator.compare(
           population.get(i)
@@ -144,7 +137,7 @@ public class CellularEngine<G extends Gene<?, G>, C extends Comparable<? super C
         ++alterCount;
       }
     }
-    return new AltererResult<>(population, alterCount);
+    return new AltererResult<>(population.asISeq(), alterCount);
   }
 
   private FilterResult<G, C> filter(final Seq<Phenotype<G, C>> population, final long generation) {
@@ -167,11 +160,11 @@ public class CellularEngine<G extends Gene<?, G>, C extends Comparable<? super C
     return new FilterResult<>(pop.toISeq(), killCount, invalidCount);
   }
 
-  private Phenotype<G, C> evolveSingle(EvolutionStart<G, C> start, final List<Phenotype<G, C>> neighbors) {
+  private Phenotype<G, C> evolveSingle(final Seq<Phenotype<G, C>> neighbors, final long generation) {
     ISeq<Phenotype<G, C>> parents = evolutionParams.offspringSelector()
                                                    .select(ISeq.of(neighbors), 2, optimize);
     AltererResult<G, C> altered = evolutionParams.alterer()
-                                                 .alter(parents, start.generation());
+                                                 .alter(parents, generation);
     return altered.population()
                   .get(0);
   }

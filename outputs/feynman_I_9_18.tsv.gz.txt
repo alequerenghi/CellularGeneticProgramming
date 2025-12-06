@@ -1,0 +1,47 @@
+
+
+Structure: grid
+
+Best fitness: 0.01864
+Average fitness: 0.05396
+Best individual: sqrt(sqrt(sqrt(m2/y2))/((sqrt(z2) + 7.813320843275575*G) - (y1*0.8503590739546585 - x2*y1)))
+
+
+
+Structure: Barbasi Albert
+
+Best fitness: 0.01996
+Average fitness: 0.04136
+Best individual: sqrt((x1^2.0 + 8.411067262178376*G)*sqrt(x1 + G))/(sqrt(m1 + x2)/(x1/x2 - (y2 + x1)) + ((x2/z1)*(m2 - y2) + 21.604306123476555))
+
+
+
+Structure: Multiple in- and out-nodes
+
+Best fitness: 0.01584
+Average fitness: 0.04206
+Best individual: sqrt(sqrt(y1 + m2)/(m1/z1 + 1.0))/((sqrt(x1 - G) + (sqrt(m2) - 3.146744614376966/y1))*sqrt(z1/x2 + (4.052535897831149 + z2)))
+
+
+
+Structure: Erdos Renyi
+
+Best fitness: 0.01474
+Average fitness: 0.05902
+Best individual: sqrt(sqrt(sqrt(m1)/19279.819069542904)*exp(sqrt(z1 + x2)))
+
+
+
+Structure: Watts Strogatz
+
+Best fitness: 0.01534
+Average fitness: 0.03750
+Best individual: (sqrt(sqrt(m1) + 2.9178225498437516*y2)*sqrt(sqrt(m1 + z1)))/(sqrt(sqrt(m1/x1)) + ((G/z1 + (8.880688241651766 + x1)) + (sqrt(z1) - sqrt(y2))))
+
+
+
+Standard GP:
+
+Best fitness: 0.00876
+Average fitness: 0.01225
+Best individual: sqrt(((2.0*m1)/(x1/sqrt(G)))/((y1 - m1)*((y1 - z2)*z1) + exp((2.0*m1)/((x1 + 5.510075020009736)/sqrt(G)))))
