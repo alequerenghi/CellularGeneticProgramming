@@ -137,7 +137,7 @@ public class CellularEngine<G extends Gene<?, G>, C extends Comparable<? super C
         ++alterCount;
       }
     }
-    return new AltererResult<>(population.asISeq(), alterCount);
+    return new AltererResult<>(offsprings.asISeq(), alterCount);
   }
 
   private FilterResult<G, C> filter(final Seq<Phenotype<G, C>> population, final long generation) {

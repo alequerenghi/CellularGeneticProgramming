@@ -26,10 +26,10 @@ public class FitnessEvaluator<G extends Gene<?, G>, C extends Comparable<? super
   }
 
   @Override
-  public ISeq<Phenotype<G, C>> eval(Seq<Phenotype<G, C>> population) {
+  public ISeq<Phenotype<G, C>> eval(final Seq<Phenotype<G, C>> population) {
 
     try {
-      List<Future<Phenotype<G, C>>> futures = new ArrayList<>();
+      final List<Future<Phenotype<G, C>>> futures = new ArrayList<>();
       for (Phenotype<G, C> ph : population) {
         futures.add(pool.submit(() -> {
           if (ph.isEvaluated()) {
