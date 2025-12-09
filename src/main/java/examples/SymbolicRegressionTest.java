@@ -12,10 +12,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
@@ -24,7 +20,6 @@ import cellular.CellularEngine;
 import cellular.GraphMap;
 import cellular.GraphMaps;
 import io.jenetics.Mutator;
-import io.jenetics.Phenotype;
 import io.jenetics.engine.Engine;
 import io.jenetics.engine.EvolutionResult;
 import io.jenetics.ext.SingleNodeCrossover;
@@ -45,136 +40,103 @@ public class SymbolicRegressionTest {
 
   private static final Random random = new Random(42);
 
-  private static final ISeq<Op<Double>> OPS = ISeq.of(
-      MathOp.ADD,
-      MathOp.SUB,
-      MathOp.MUL,
-      MathOp.DIV,
-      MathOp.SQRT,
-      MathOp.EXP);
+  private static final ISeq<Op<Double>> OPS = ISeq.of(MathOp.ADD,
+                                                      MathOp.SUB,
+                                                      MathOp.MUL,
+                                                      MathOp.DIV,
+                                                      MathOp.SQRT,
+                                                      MathOp.EXP);
 
-  private static final List<GraphMap> GRIDS = List.of(
-      GraphMaps.grid(100),
-      GraphMaps.barabasiAlbert(100, 5),
-      GraphMaps.multipleInAndOutNodes(100, .3, .3, 5),
-      GraphMaps.erdosRenyi(100, 0.1),
-      GraphMaps.wattsStrogatz(100, 5, .1));
+  private static final List<GraphMap> GRIDS = List.of(GraphMaps.grid(100),
+                                                      GraphMaps.barabasiAlbert(100, 5),
+                                                      GraphMaps.multipleInAndOutNodes(100, .3, .3, 5),
+                                                      GraphMaps.erdosRenyi(100, 0.1),
+                                                      GraphMaps.wattsStrogatz(100, 5, .1));
 
   public static void main(String... args) {
 
     Set<File> inputFiles = Stream.of(new File("data").listFiles())
                                  .filter(f -> !f.isDirectory())
                                  .collect(Collectors.toSet());
-
-    try (ExecutorService pool = Executors.newFixedThreadPool(
-        Runtime.getRuntime()
-               .availableProcessors())) {
+    try {
 
       for (File file : inputFiles) {
         final StringBuilder output = new StringBuilder();
-
         final Regression<Double> regression = generateProblem(file);
-
         for (GraphMap grid : GRIDS) {
-
           output.append("\n\n")
-                .append(evolveAsync(regression, grid, pool));
+                .append(evolveAsync(regression, grid));
         }
-
         List<EvolutionResult<ProgramGene<Double>, Double>> standardResults = new ArrayList<>(10);
         for (int i = 0; i < 10; i++) {
-          Engine<ProgramGene<Double>, Double> engine = Engine.builder(regression)
-                                                             .minimizing()
-                                                             .populationSize(100)
-                                                             .alterers(new SingleNodeCrossover<>(0.1), new Mutator<>())
-                                                             .build();
-          EvolutionResult<ProgramGene<Double>, Double> er = engine.stream()
-                                                                  .limit(50)
-                                                                  .collect(EvolutionResult.toBestEvolutionResult());
+          var engine = Engine.builder(regression)
+                             .minimizing()
+                             .populationSize(100)
+                             .alterers(new SingleNodeCrossover<>(0.8), new Mutator<>())
+                             .build();
+          var er = engine.stream()
+                         .limit(30)
+                         .collect(EvolutionResult.toBestEvolutionResult());
           standardResults.add(er);
         }
         double averageFitness = standardResults.stream()
                                                .mapToDouble(EvolutionResult::bestFitness)
                                                .average()
                                                .orElse(0);
-        Phenotype<ProgramGene<Double>, Double> bestPhenotype = standardResults.stream()
-                                                                              .map(EvolutionResult::bestPhenotype)
-                                                                              .sorted()
-                                                                              .toList()
-                                                                              .get(0);
-
+        var bestPhenotype = standardResults.stream()
+                                           .map(EvolutionResult::bestPhenotype)
+                                           .sorted()
+                                           .toList()
+                                           .get(0);
         Double bestFitness = bestPhenotype.fitness();
-
-        TreeNode<Op<Double>> tree = bestPhenotype.genotype()
-                                                 .gene()
-                                                 .toTreeNode();
-
+        var tree = bestPhenotype.genotype()
+                                .gene()
+                                .toTreeNode();
         MathExpr.rewrite(tree);
-
-        output.append("\n\n")
-              .append(
-                  String.format(
-                      "Standard GP:%n%nBest fitness: %.5f%nAverage fitness: %.5f%nBest individual: %s",
-                      bestFitness,
-                      averageFitness,
-                      new MathExpr(tree).toString()));
+        output.append(String.format("Standard GP:%n%nBest fitness: %.5f%nAverage fitness: %.5f%nBest individual: %s",
+                                    bestFitness,
+                                    averageFitness,
+                                    new MathExpr(tree).toString()))
+              .append("\n\n");
         writeOutput(output.toString(), file);
       }
-    } catch (InterruptedException e) {
-      Thread.currentThread()
-            .interrupt();
-      e.printStackTrace();
-    } catch (IOException | ExecutionException e) {
+    } catch (IOException e) {
       e.printStackTrace();
     }
   }
 
-  private static String evolveAsync(Regression<Double> problem, GraphMap connections, ExecutorService pool)
-      throws InterruptedException, ExecutionException {
-    List<Future<EvolutionResult<ProgramGene<Double>, Double>>> futures = new ArrayList<>(10);
-    for (int i = 0; i < 10; i++) {
-      futures.add(pool.submit(() -> {
-        CellularEngine<ProgramGene<Double>, Double> engine = CellularEngine.builder(problem)
-                                                                           .topology(connections)
-                                                                           .minimizing()
-                                                                           .alterers(
-                                                                               new SingleNodeCrossover<>(.8),
-                                                                               new Mutator<>())
-                                                                           .build();
-        return engine.stream()
-                     .limit(50)
-                     .collect(EvolutionResult.toBestEvolutionResult());
-      }));
-    }
-
+  private static String evolveAsync(Regression<Double> problem, GraphMap connections) {
     List<EvolutionResult<ProgramGene<Double>, Double>> results = new ArrayList<>(10);
-    for (int i = 0; i < futures.size(); i++) {
-      results.add(
-          futures.get(i)
-                 .get());
+    for (int i = 0; i < 10; i++) {
+      var engine = CellularEngine.builder(problem)
+                                 .topology(connections)
+                                 .minimizing()
+                                 .alterers(new SingleNodeCrossover<>(.8), new Mutator<>())
+                                 .build();
+      var er = engine.stream()
+                     .limit(30)
+                     .collect(EvolutionResult.toBestEvolutionResult());
+      results.add(er);
     }
     double avgFitness = results.stream()
                                .mapToDouble(EvolutionResult::bestFitness)
                                .average()
                                .orElse(0);
-    Phenotype<ProgramGene<Double>, Double> bestPhenotype = results.stream()
-                                                                  .map(EvolutionResult::bestPhenotype)
-                                                                  .sorted()
-                                                                  .toList()
-                                                                  .get(0);
+    var bestPhenotype = results.stream()
+                               .map(EvolutionResult::bestPhenotype)
+                               .sorted()
+                               .toList()
+                               .get(0);
     Double bestFitness = bestPhenotype.fitness();
     TreeNode<Op<Double>> tree = bestPhenotype.genotype()
                                              .gene()
                                              .toTreeNode();
-
     MathExpr.rewrite(tree);
-
-    return String.format(
-        "Structure: %s%n%nBest fitness: %.5f%nAverage fitness: %.5f%nBest individual: %s%n%n",
-        connections.toString(),
-        bestFitness,
-        avgFitness,
-        new MathExpr(tree).toString());
+    return String.format("Structure: %s%n%nBest fitness: %.5f%nAverage fitness: %.5f%nBest individual: %s%n%n",
+                         connections.toString(),
+                         bestFitness,
+                         avgFitness,
+                         new MathExpr(tree).toString());
   }
 
   private static Regression<Double> generateProblem(File file) throws IOException {
@@ -190,19 +152,16 @@ public class SymbolicRegressionTest {
         terminals.add(Var.of(vars[i], i));
       }
       terminals.add(EphemeralConst.of(() -> random.nextDouble(10)));
-
       final String csvData = br.readAllAsString()
                                .replace("\t", ", ");
       List<Sample<Double>> samples = Sample.parseDoubles(csvData);
-      return Regression.of(
-          Regression.codecOf(
-              OPS,
-              ISeq.of(terminals),
-              5,
-              gt -> gt.gene()
-                      .size() < 50),
-          Error.of(LossFunction::mse),
-          samples);
+      return Regression.of(Regression.codecOf(OPS,
+                                              ISeq.of(terminals),
+                                              5,
+                                              gt -> gt.gene()
+                                                      .size() < 50),
+                           Error.of(LossFunction::mse),
+                           samples);
     }
   }
 
