@@ -9,200 +9,315 @@ import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+/**
+ * Utility class for generating different graph topologies used by the Cellular
+ * Genetic Programming engine. Every graph is represented as an adjacency list:
+ * node -> list of neighbor nodes.
+ */
 public class GraphMaps {
 
-	private static final Random RNG = new Random(42);
+  /** Deterministic global RNG for reproducible topology generation. */
+  private static final Random RNG = new Random(42);
 
-	private GraphMaps() {
-		// nothing
-	}
+  private GraphMaps() {
+    // Prevent instantiation.
+  }
 
-	public static GraphMap grid(int popSize) {
-		int gridSize = (int) Math.sqrt(popSize);
+  /**
+   * Generates a 2D toroidal grid topology (wrapped both horizontally and
+   * vertically).
+   *
+   * @param popSize total number of nodes. Should ideally be a square number.
+   * @return GraphMap representing toroidal grid neighbors.
+   */
+  public static GraphMap grid(int popSize) {
+    int gridSize = (int) Math.sqrt(popSize);
 
-		HashMap<Integer, List<Integer>> map = new HashMap<>();
-		for (int i = 0; i < popSize; i++) {
-			ArrayList<Integer> neighbors = new ArrayList<>();
-			neighbors.add((i + 1) % popSize);
-			neighbors.add(i - 1 < 0 ? popSize - 1 : i - 1);
-			neighbors.add((i + gridSize) % popSize);
-			neighbors.add(i - gridSize < 0 ? popSize - gridSize + i : i - gridSize);
-			map.put(i, neighbors);
-		}
-		return new GraphMap(map, "grid");
-	}
+    HashMap<Integer, List<Integer>> map = new HashMap<>();
+    for (int i = 0; i < popSize; i++) {
+      ArrayList<Integer> neighbors = new ArrayList<>();
 
-	public static GraphMap multipleInAndOutNodes(int numNodes, double highInFraction, double highOutFraction,
-			int avgDegree) {
+      // Horizontal wrap-around neighbors
+      neighbors.add((i + 1) % popSize); // right
+      neighbors.add(i - 1 < 0 ? popSize - 1 : i - 1); // left
 
-		Map<Integer, List<Integer>> graph = new HashMap<>();
+      // Vertical wrap-around neighbors
+      neighbors.add((i + gridSize) % popSize); // down
+      neighbors.add(i - gridSize < 0 ? popSize - gridSize + i : i - gridSize); // up
 
-		// Initialize empty adjacency lists
-		for (int i = 0; i < numNodes; i++) {
-			graph.put(i, new ArrayList<>());
-		}
+      map.put(i, neighbors);
+    }
+    return new GraphMap(map, "grid");
+  }
 
-		// Pick hub nodes
-		int numInHubs = (int) (numNodes * highInFraction);
-		int numOutHubs = (int) (numNodes * highOutFraction);
+  /**
+   * Generates a graph where some nodes have many incoming edges (in-hubs) and
+   * some nodes have many outgoing edges (out-hubs).
+   *
+   * This produces an asymmetric structure with directional preference.
+   *
+   * @param numNodes        total number of nodes
+   * @param highInFraction  fraction of nodes designated as in-hubs
+   * @param highOutFraction fraction of nodes designated as out-hubs
+   * @param avgDegree       baseline average degree for normal nodes
+   * @return GraphMap with asymmetric degrees
+   */
+  public static GraphMap multipleInAndOutNodes(
+      int numNodes,
+      double highInFraction,
+      double highOutFraction,
+      int avgDegree) {
 
-		Set<Integer> inHubs = pickRandomSet(numNodes, numInHubs);
-		Set<Integer> outHubs = pickRandomSet(numNodes, numOutHubs);
+    Map<Integer, List<Integer>> graph = new HashMap<>();
 
-		// Build edges
-		for (int from = 0; from < numNodes; from++) {
+    // Initialize adjacency lists
+    for (int i = 0; i < numNodes; i++) {
+      graph.put(i, new ArrayList<>());
+    }
 
-			int degree;
+    // Select hub groups
+    int numInHubs = (int) (numNodes * highInFraction);
+    int numOutHubs = (int) (numNodes * highOutFraction);
 
-			if (outHubs.contains(from)) {
-				// Out-hubs have more outgoing edges
-				degree = Math.powExact(avgDegree, 2);
-			} else {
-				// Normal nodes
-				degree = avgDegree;
-			}
+    Set<Integer> inHubs = pickRandomSet(numNodes, numInHubs);
+    Set<Integer> outHubs = pickRandomSet(numNodes, numOutHubs);
 
-			for (int k = 0; k < degree; k++) {
-				int to = RNG.nextInt(numNodes);
-				if (to == from)
-					continue; // avoid self-loop
+    // Out-hubs get many outgoing edges; other nodes get avgDegree
+    for (int from = 0; from < numNodes; from++) {
 
-				graph.get(from).add(to);
-			}
-		}
+      int degree;
+      if (outHubs.contains(from)) {
+        degree = Math.powExact(avgDegree, 2);
+      } else {
+        degree = avgDegree;
+      }
 
-		// Add extra incoming edges for in-hubs
-		for (int hub : inHubs) {
-			int extraIn = Math.powExact(avgDegree, 2);
+      for (int k = 0; k < degree; k++) {
+        int to = RNG.nextInt(numNodes);
+        if (to == from)
+          continue; // avoid self-loop
 
-			for (int k = 0; k < extraIn; k++) {
-				int from = RNG.nextInt(numNodes);
-				if (from == hub)
-					continue;
+        graph.get(from)
+             .add(to);
+      }
+    }
 
-				graph.get(from).add(hub);
+    // In-hubs receive many extra incoming edges
+    for (int hub : inHubs) {
+      int extraIn = Math.powExact(avgDegree, 2);
 
-			}
-		}
-		return new GraphMap(graph, "Multiple in- and out-nodes");
-	}
+      for (int k = 0; k < extraIn; k++) {
+        int from = RNG.nextInt(numNodes);
+        if (from == hub)
+          continue;
 
-	public static GraphMap barabasiAlbert(int graphSize, int m) {
-		int m0 = RNG.nextInt(m, 2 * m);
+        graph.get(from)
+             .add(hub);
+      }
+    }
 
-		Map<Integer, List<Integer>> g = new HashMap<>();
+    return new GraphMap(graph, "Multiple in- and out-nodes");
+  }
 
-		for (int i = 0; i < graphSize; i++) {
-			g.put(i, new ArrayList<>());
-		}
+  /**
+   * Barabási–Albert scale-free model generator.
+   *
+   * Hubs emerge naturally because nodes with higher degree are preferentially
+   * selected.
+   *
+   * Note: The implementation initializes all nodes up front, then attempts a
+   * growing process. This deviates from the classical BA model but preserves
+   * preferential attachment semantics.
+   *
+   * @param graphSize number of nodes
+   * @param m         number of edges added for each new node (preferentially)
+   * @return GraphMap with approximate BA structure
+   */
+  public static GraphMap barabasiAlbert(int graphSize, int m) {
+    int m0 = RNG.nextInt(m, 2 * m);
 
-		for (int i = 0; i < m0; i++) {
-			for (int j = 0; j < m0; j++) {
-				if (i != j) {
-					g.get(i).add(j);
-					g.get(j).add(i);
-				}
-			}
-		}
+    Map<Integer, List<Integer>> g = new HashMap<>();
 
-		while (g.size() < graphSize) {
-			int current = g.size();
-			g.put(current, new ArrayList<>());
-			List<Integer> connections = g.values().stream().map(List::size)
-					.collect(Collectors.toCollection(ArrayList::new));
-			int nConnections = connections.stream().mapToInt(Integer::intValue).sum();
-			for (int i = 0; i < m; i++) {
-				int chosen = proportionalSelection(connections, nConnections);
-				g.get(chosen).add(current);
-				g.get(current).add(chosen);
-				connections.set(chosen, connections.get(chosen) + 1);
-				connections.set(current, connections.get(current) + 1);
-				nConnections += 2;
-			}
-		}
-		return new GraphMap(g, "Barbasi Albert");
-	}
+    // Initialize adjacency lists
+    for (int i = 0; i < graphSize; i++) {
+      g.put(i, new ArrayList<>());
+    }
 
-	private static int proportionalSelection(List<Integer> weights, int weightsSum) {
-		double r = RNG.nextDouble() * weightsSum;
-		int i;
-		for (i = 0; i < weights.size() && r > 0; i++) {
-			r -= weights.get(i);
-		}
-		return i;
-	}
+    // Fully connect initial m0 nodes
+    for (int i = 0; i < m0; i++) {
+      for (int j = 0; j < m0; j++) {
+        if (i != j) {
+          g.get(i)
+           .add(j);
+          g.get(j)
+           .add(i);
+        }
+      }
+    }
 
-	public static GraphMap wattsStrogatz(int graphSize, int k, double beta) {
+    // Preferentially attach the rest
+    while (g.size() < graphSize) {
+      int current = g.size();
+      g.put(current, new ArrayList<>());
 
-		Map<Integer, List<Integer>> g = new HashMap<>();
+      List<Integer> connections = g.values()
+                                   .stream()
+                                   .map(List::size)
+                                   .collect(Collectors.toCollection(ArrayList::new));
 
-		for (int i = 0; i < graphSize; i++) {
-			g.put(i, new ArrayList<>());
-			for (int j = 1; j <= k / 2; j++) {
-				int neighbor = (i + j) % graphSize;
-				g.get(i).add(neighbor);
-			}
-		}
+      int nConnections = connections.stream()
+                                    .mapToInt(Integer::intValue)
+                                    .sum();
 
-		for (int i = 0; i < graphSize; i++) {
+      for (int i = 0; i < m; i++) {
+        int chosen = proportionalSelection(connections, nConnections);
+        g.get(chosen)
+         .add(current);
+        g.get(current)
+         .add(chosen);
 
-			List<Integer> outs = g.get(i);
+        connections.set(chosen, connections.get(chosen) + 1);
+        connections.set(current, connections.get(current) + 1);
+        nConnections += 2;
+      }
+    }
+    return new GraphMap(g, "Barabasi Albert");
+  }
 
-			for (int idx = 0; idx < outs.size(); idx++) {
-				if (RNG.nextDouble() < beta) {
-					int newTarget;
-					do {
-						newTarget = RNG.nextInt(graphSize);
-					} while (newTarget == i || outs.contains(newTarget));
+  /**
+   * Selects an index proportional to its weight value.
+   *
+   * @param weights    list of weights
+   * @param weightsSum sum of all weights
+   * @return selected index
+   */
+  private static int proportionalSelection(List<Integer> weights, int weightsSum) {
+    double r = RNG.nextDouble() * weightsSum;
+    int i;
+    for (i = 0; i < weights.size() && r > 0; i++) {
+      r -= weights.get(i);
+    }
+    return i;
+  }
 
-					outs.set(idx, newTarget);
-				}
-			}
-		}
-		return new GraphMap(g, "Watts Strogatz");
-	}
+  /**
+   * Watts–Strogatz small-world graph.
+   *
+   * Starts as a ring lattice where every node connects to k/2 neighbors on each
+   * side. Then edges are rewired randomly with probability beta.
+   *
+   * Rewiring introduces shortcuts, reducing average path length.
+   *
+   * @param graphSize number of nodes
+   * @param k         number of neighbors (must be even)
+   * @param beta      rewiring probability
+   * @return Watts–Strogatz graph
+   */
+  public static GraphMap wattsStrogatz(int graphSize, int k, double beta) {
 
-	public static GraphMap erdosRenyi(int n, double p) {
-		Map<Integer, List<Integer>> g = new HashMap<>();
+    Map<Integer, List<Integer>> g = new HashMap<>();
 
-		for (int i = 0; i < n; i++) {
-			g.put(i, new ArrayList<>());
-			for (int j = 0; j < n; j++) {
-				if (i != j && RNG.nextDouble() < p) {
-					g.get(i).add(j);
-				}
-			}
-		}
-		return new GraphMap(g, "Erdos Renyi");
-	}
+    // Regular ring lattice
+    for (int i = 0; i < graphSize; i++) {
+      g.put(i, new ArrayList<>());
+      for (int j = 1; j <= k / 2; j++) {
+        int neighbor = (i + j) % graphSize;
+        g.get(i)
+         .add(neighbor);
+      }
+    }
 
-	public static GraphMap layeredDAG(final int layers, final int nodesPerLayer, final double forwardProb) {
+    // Rewiring
+    for (int i = 0; i < graphSize; i++) {
 
-		int total = layers * nodesPerLayer;
-		Map<Integer, List<Integer>> g = new HashMap<>();
+      List<Integer> outs = g.get(i);
 
-		for (int i = 0; i < total; i++) {
-			g.put(i, new ArrayList<>());
-		}
+      for (int idx = 0; idx < outs.size(); idx++) {
+        if (RNG.nextDouble() < beta) {
+          int newTarget;
+          do {
+            newTarget = RNG.nextInt(graphSize);
+          } while (newTarget == i || outs.contains(newTarget));
 
-		for (int l = 0; l < layers - 1; l++) {
-			for (int i = l * nodesPerLayer; i < (l + 1) * nodesPerLayer; i++) {
-				for (int j = (l + 1) * nodesPerLayer; j < (l + 2) * nodesPerLayer; j++) {
-					if (RNG.nextDouble() < forwardProb) {
-						g.get(i).add(j);
-					}
-				}
-			}
-		}
-		return new GraphMap(g, "Layered Directed Acyclic graph");
-	}
+          outs.set(idx, newTarget);
+        }
+      }
+    }
+    return new GraphMap(g, "Watts Strogatz");
+  }
 
-	private static Set<Integer> pickRandomSet(int max, int count) {
-		Set<Integer> set = new HashSet<>();
-		while (set.size() < count) {
-			set.add(RNG.nextInt(max));
-		}
-		return set;
-	}
+  /**
+   * Erdos–Renyi random graph G(n, p).
+   *
+   * Every possible directed edge i -> j exists independently with probability p.
+   *
+   * @param n number of nodes
+   * @param p probability of each directed edge existing
+   * @return Erdos–Renyi graph
+   */
+  public static GraphMap erdosRenyi(int n, double p) {
+    Map<Integer, List<Integer>> g = new HashMap<>();
+
+    for (int i = 0; i < n; i++) {
+      g.put(i, new ArrayList<>());
+      for (int j = 0; j < n; j++) {
+        if (i != j && RNG.nextDouble() < p) {
+          g.get(i)
+           .add(j);
+        }
+      }
+    }
+    return new GraphMap(g, "Erdos Renyi");
+  }
+
+  /**
+   * Generates a Layered Directed Acyclic Graph (DAG).
+   *
+   * Nodes are arranged in layers, and edges only go from layer L to L+1, never
+   * backwards. This enforces acyclicity.
+   *
+   * @param layers        number of layers
+   * @param nodesPerLayer nodes in each layer
+   * @param forwardProb   probability of creating an edge from L to L+1
+   * @return Layered DAG
+   */
+  public static GraphMap layeredDAG(final int layers, final int nodesPerLayer, final double forwardProb) {
+
+    int total = layers * nodesPerLayer;
+    Map<Integer, List<Integer>> g = new HashMap<>();
+
+    // Initialize graph
+    for (int i = 0; i < total; i++) {
+      g.put(i, new ArrayList<>());
+    }
+
+    // Add forward-only edges
+    for (int l = 0; l < layers - 1; l++) {
+      for (int i = l * nodesPerLayer; i < (l + 1) * nodesPerLayer; i++) {
+        for (int j = (l + 1) * nodesPerLayer; j < (l + 2) * nodesPerLayer; j++) {
+          if (RNG.nextDouble() < forwardProb) {
+            g.get(i)
+             .add(j);
+          }
+        }
+      }
+    }
+    return new GraphMap(g, "Layered Directed Acyclic graph");
+  }
+
+  /**
+   * Helper for selecting a random set of unique integers.
+   *
+   * @param max   exclusive upper bound for values
+   * @param count number of unique values required
+   * @return set of random integers
+   */
+  private static Set<Integer> pickRandomSet(int max, int count) {
+    Set<Integer> set = new HashSet<>();
+    while (set.size() < count) {
+      set.add(RNG.nextInt(max));
+    }
+    return set;
+  }
 
 }
