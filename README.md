@@ -45,10 +45,11 @@ node index -> list of neighbor node indices
 
 Predefined topologies include:
 
-* Grid neighborhoods (von Neumann, Moore)
+* Grid neighborhoods
 * Random graphs
 * Barabási–Albert scale-free networks
-* Fully connected networks
+* Watts-Strogatz networks
+* Erdos-Renyi networks
 * User-defined custom graphs
 
 Example:
