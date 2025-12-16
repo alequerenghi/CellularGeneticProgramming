@@ -64,6 +64,10 @@ public class GraphMap {
     return map.get(node);
   }
 
+  public Map<Integer, List<Integer>> getMap() {
+    return map;
+  }
+
   /**
    * Returns a human-readable name for this graph.
    *
